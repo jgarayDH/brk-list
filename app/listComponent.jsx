@@ -105,8 +105,8 @@ export default function ParticipantList() {
       <h1 className='mb-0'>THE UNDERMOTION - 24.02.24</h1>
       <p className='mt-1 text-right'>Boletos utilizados: <span className='font-bold '>{totalTicketsUsed}</span></p>
 
-      <div className='flex pb-3 gap-3'>
-        <InputText className='w-10 flex' value={globalFilterValue} onChange={onGlobalFilterChange} placeholder="Buscar por nombre" />
+      <div className='flex flex-column sm:flex-row pb-3 gap-3'>
+        <InputText className='w-12 sm:w-6 md:w-10 flex' value={globalFilterValue} onChange={onGlobalFilterChange} placeholder="Buscar por nombre" />
         <Button icon="pi pi-refresh" label='Recargar' severity="secondary"  onClick={fetchData} disabled={loading} />
         <Button icon="pi pi-refresh" label='Limpiar' onClick={clearInput} />
       </div>
