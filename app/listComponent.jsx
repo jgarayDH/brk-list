@@ -4,7 +4,7 @@ import { getSheetData } from "./google-sheets.action";
 import { DataTable } from 'primereact/datatable';
 import { Column } from 'primereact/column';
 import { InputText } from 'primereact/inputtext';
-import { FilterMatchMode, FilterOperator } from 'primereact/api';
+import { FilterMatchMode } from 'primereact/api';
 import { InputNumber } from 'primereact/inputnumber';
 import { Button } from 'primereact/button';
 
@@ -75,10 +75,8 @@ export default function ParticipantList() {
           showButtons
           buttonLayout="horizontal"
           step={1}
-          decrementButtonClassName="p-button-danger"
           min={0}
           max={rowData.cantidad}
-          incrementButtonClassName="p-button-success"
           incrementButtonIcon="pi pi-plus"
           decrementButtonIcon="pi pi-minus"
           inputClassName='w-3rem text-center'
@@ -90,14 +88,27 @@ export default function ParticipantList() {
 
   const totalTicketsUsed = sheetData.reduce((total, rowData) => total + rowData.utilizados, 0);
 
+  const fetchData = async () => {
+    try {
+      setLoading(true); // Indicar que se está cargando
+      const response = await getSheetData();
+      setSheetData(response.data);
+      setLoading(false); // Indicar que la carga ha terminado
+    } catch (error) {
+      console.error('Error fetching sheet data:', error);
+      setLoading(false); // Asegurarse de indicar que la carga ha terminado en caso de error
+    }
+  };
+
   return (
     <div className='p-2'>
       <h1 className='mb-0'>THE UNDERMOTION - 24.02.24</h1>
       <p className='mt-1 text-right'>Boletos utilizados: <span className='font-bold '>{totalTicketsUsed}</span></p>
 
-      <div className='w-100 flex pb-3'>
-        <InputText className='w-full' value={globalFilterValue} onChange={onGlobalFilterChange} placeholder="Buscar por nombre" />
-        <Button icon="pi pi-refresh" label='Limpiar' className="ml-3" onClick={clearInput} />
+      <div className='flex pb-3 gap-3'>
+        <InputText className='w-10 flex' value={globalFilterValue} onChange={onGlobalFilterChange} placeholder="Buscar por nombre" />
+        <Button icon="pi pi-refresh" label='Recargar' severity="secondary"  onClick={fetchData} disabled={loading} />
+        <Button icon="pi pi-refresh" label='Limpiar' onClick={clearInput} />
       </div>
 
       <DataTable value={sheetData} paginator rows={50} filters={filters} loading={loading} dataKey="id" tableStyle={{ minWidth: '50rem' }}>

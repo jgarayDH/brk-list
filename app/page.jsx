@@ -1,14 +1,19 @@
 "use client";
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Password } from 'primereact/password';
 import { Button } from 'primereact/button';
 import ParticipantList from './listComponent';
 import './globals.css';
 
 const Home = () => {
-  const storedLoggedIn = localStorage.getItem('loggedIn') === 'true';
+ 
   const [password, setPassword] = useState('');
-  const [loggedIn, setLoggedIn] = useState(storedLoggedIn);
+  const [loggedIn, setLoggedIn] = useState(false);
+
+  useEffect(() => {
+    const storedLoggedIn = localStorage.getItem('loggedIn') === 'true';
+    setLoggedIn(storedLoggedIn);
+  }, []);
 
   const handleLogin = () => {
     // Verificar la contraseña (puedes cambiar la contraseña aquí)
