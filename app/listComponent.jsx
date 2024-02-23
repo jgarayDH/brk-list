@@ -7,12 +7,13 @@ import { InputText } from 'primereact/inputtext';
 import { FilterMatchMode } from 'primereact/api';
 import { InputNumber } from 'primereact/inputnumber';
 import { Button } from 'primereact/button';
+import { updateRowData, updateCellValue } from './google-sheets-update';
 
 export default function ParticipantList() {
   const [sheetData, setSheetData] = useState([]);
   const [filters, setFilters] = useState({
-    global: { value: null, matchMode: FilterMatchMode.STARTS_WITH },
-    nombre: { value: null, matchMode: FilterMatchMode.STARTS_WITH },
+    global: { value: null, matchMode: FilterMatchMode.CONTAINS },
+    nombre: { value: null, matchMode: FilterMatchMode.CONTAINS },
   });
   const [loading, setLoading] = useState(true);
   const [globalFilterValue, setGlobalFilterValue] = useState('');
@@ -47,17 +48,23 @@ export default function ParticipantList() {
     setFilters({ ...filters, nombre: { value: null } });
   };
 
-  const handleTicketChange = (rowData, newValue) => {
+  const handleTicketChange = async (rowData, newValue) => {
+
+    let id = Number(rowData.id) + 1;
+    console.log(id)
+
     // Verificar que la cantidad de tickets utilizados no sea mayor que la cantidad de tickets disponibles
     if (newValue >= 0 && newValue <= rowData.cantidad) {
       // Actualizar el valor de tickets utilizados
       rowData.utilizados = newValue;
-
+      
       // Realizar la actualización en el backend (por ejemplo, llamando a una función API)
-      // ...
+      await updateCellValue(id, 6, newValue);
+
+      const updatedData = await getSheetData();
 
       // Actualizar el estado local para que se refleje en la interfaz de usuario
-      setSheetData([...sheetData]);
+      setSheetData(updatedData.data);
     }
   };
 
@@ -113,6 +120,7 @@ export default function ParticipantList() {
 
       <DataTable value={sheetData} paginator rows={50} filters={filters} loading={loading} dataKey="id" tableStyle={{ minWidth: '50rem' }}>
         <Column field="nombre" header="Nombre"></Column>
+        <Column field='tier' header="Tier"></Column>
         <Column field="tipo" header="Tipo"></Column>
         <Column field="socio" header="Socio"></Column>
         <Column field="utilizados" header="Boletos" body={ticketCountTemplate}></Column>
