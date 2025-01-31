@@ -101,10 +101,31 @@ export default function Home() {
       </DataTable>
 
       {/* MODAL PARA ESCANEAR CÓDIGO QR */}
-      <Dialog header="Escanear Código QR" visible={showQRModal} style={{ width: "50vw" }} onHide={() => setShowQRModal(false)}>
-        <QrReader onResult={handleScan} style={{ width: "100%" }} />
-        <p className="text-center font-bold">{qrMessage}</p>
-        <Button label="Cerrar" icon="pi pi-times" className="p-button-secondary w-full mt-3" onClick={() => setShowQRModal(false)} />
+      <Dialog
+        header="Escanear Código QR"
+        visible={showQRModal}
+        style={{ width: "100vw", height: "100vh", maxWidth: "100%", maxHeight: "100%" }}
+        onHide={() => setShowQRModal(false)}
+        className="qr-dialog"
+      >
+        <div className="qr-scanner-container">
+          <QrReader
+            onResult={handleScan}
+            constraints={{ facingMode: "environment" }} // Usa la cámara trasera
+            containerStyle={{ width: "100%", height: "100%" }}
+          />
+          {/* Marco del Escáner */}
+          <div className="qr-frame"></div>
+          {/* Mensaje QR */}
+          <p className="qr-message">{qrMessage}</p>
+          {/* Botón de cierre */}
+          <Button
+            label="Cerrar"
+            icon="pi pi-times"
+            className="p-button-secondary close-btn"
+            onClick={() => setShowQRModal(false)}
+          />
+        </div>
       </Dialog>
     </div>
   );
