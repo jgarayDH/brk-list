@@ -109,7 +109,7 @@ export default function ParticipantList() {
 
   return (
     <div className='p-2'>
-      <h1 className='mb-0'>THE UNDERMOTION - 24.02.24</h1>
+      <h1 className='mb-0'>Mixmag Latam - BRK | Eternals 18.01.25</h1>
       <p className='mt-1 text-right'>Boletos utilizados: <span className='font-bold '>{totalTicketsUsed}</span></p>
 
       <div className='flex flex-column sm:flex-row pb-3 gap-3'>
