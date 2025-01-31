@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect } from "react";
-import { getSheetData, updateAttendedStatus } from "./services/googleSheetsServices";
+import { getSheetData } from "./services/googleSheetsServices";
 import { DataTable } from "primereact/datatable";
 import { Column } from "primereact/column";
 import { InputText } from "primereact/inputtext";
@@ -11,7 +11,10 @@ import { QrReader } from "react-qr-reader";
 import "./styles/globals.css";
 
 export default function Home() {
+  const [isProcessing, setIsProcessing] = useState(false); // 🔹 Bloquea escaneos repetidos
+  const [loadingQR, setLoadingQR] = useState(false);
   const [sheetData, setSheetData] = useState([]);
+  const [ticketInfo, setTicketInfo] = useState(null);
   const [filters, setFilters] = useState({
     global: { value: null, matchMode: FilterMatchMode.CONTAINS },
     nombre: { value: null, matchMode: FilterMatchMode.CONTAINS },
@@ -20,6 +23,7 @@ export default function Home() {
   const [globalFilterValue, setGlobalFilterValue] = useState("");
   const [showQRModal, setShowQRModal] = useState(false);
   const [qrMessage, setQrMessage] = useState("");
+  const [disableScanner, setDisableScanner] = useState(false); // 🔹 Para desactivar la cámara después de un escaneo
 
   useEffect(() => {
     fetchData();
@@ -28,7 +32,7 @@ export default function Home() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const response = await getSheetData("undermotion");
+      const response = await getSheetData("Tickets");
       setSheetData(response);
     } catch (error) {
       console.error("Error fetching sheet data:", error);
@@ -49,26 +53,54 @@ export default function Home() {
     setFilters({ ...filters, nombre: { value: null } });
   };
 
-  // Función para manejar el escaneo de QR
   const handleScan = async (result) => {
-    if (result?.text) {
-      const scannedData = result.text.split(",");
-      const rowNumber = scannedData[0]; // Suponiendo que el QR contiene el ID del invitado en la hoja
+    if (result?.text && !isProcessing) {
+      setIsProcessing(true); // 🔹 Evita múltiples peticiones
+      setDisableScanner(true); // 🔹 Apaga la cámara temporalmente
+      setLoadingQR(true); // 🔹 Activa el estado de carga
 
-      // Buscar al invitado en la hoja
-      const invitedGuest = sheetData.find((guest) => guest.id === rowNumber);
+      try {
+        const url = new URL(result.text);
+        const params = new URLSearchParams(url.search);
+        const securityCode = params.get("security_code");
 
-      if (invitedGuest) {
-        if (invitedGuest.attended === "true") {
-          setQrMessage("❌ Este ticket ya fue registrado.");
-        } else {
-          await updateAttendedStatus(rowNumber, "true");
-          setQrMessage("✅ Ticket registrado correctamente.");
-          fetchData(); // Recargar la tabla con los datos actualizados
+        if (!securityCode) {
+          setQrMessage("❌ Código QR inválido.");
+          setTimeout(() => {
+            setIsProcessing(false);
+            setDisableScanner(false); // 🔹 Reactiva la cámara después de un tiempo
+          }, 3000);
+          return;
         }
-      } else {
-        setQrMessage("❌ Código QR inválido.");
+
+        console.log("Security Code:", securityCode);
+
+        // 🔹 Solo una petición por escaneo
+        const response = await fetch("/api/verify-ticket", {
+          method: "POST",
+          body: JSON.stringify({ securityCode }),
+          headers: { "Content-Type": "application/json" },
+        });
+
+        const { success, message, ticket } = await response.json();
+
+        if (success) {
+          setQrMessage("✅ Ticket registrado correctamente.");
+          setTicketInfo(ticket); // 🔹 Guardar datos del ticket
+          fetchData(); // 🔹 Recargar la tabla con los datos actualizados
+        } else {
+          setQrMessage(`❌ ${message}`);
+        }
+      } catch (error) {
+        setQrMessage("❌ Error procesando el código QR.");
+        console.error(error);
       }
+
+      setLoadingQR(false); // 🔹 Oculta la pantalla de carga
+      setTimeout(() => {
+        setIsProcessing(false);
+        setDisableScanner(false); // 🔹 Reactivar el escáner después de un tiempo
+      }, 3000);
     }
   };
 
@@ -105,25 +137,52 @@ export default function Home() {
         header="Escanear Código QR"
         visible={showQRModal}
         style={{ width: "100vw", height: "100vh", maxWidth: "100%", maxHeight: "100%" }}
-        onHide={() => setShowQRModal(false)}
+        onHide={() => {
+          setShowQRModal(false);
+          setTicketInfo(null);
+          setIsProcessing(false);
+          setDisableScanner(false);
+        }}
         className="qr-dialog"
       >
         <div className="qr-scanner-container">
-          <QrReader
-            onResult={handleScan}
-            constraints={{ facingMode: "environment" }} // Usa la cámara trasera
-            containerStyle={{ width: "100%", height: "100%" }}
-          />
-          {/* Marco del Escáner */}
-          <div className="qr-frame"></div>
-          {/* Mensaje QR */}
+          {/* Mostrar QR Scanner solo si no está procesando */}
+          {!loadingQR && !ticketInfo && !disableScanner && (
+            <QrReader
+              onResult={handleScan}
+              constraints={{ facingMode: "environment" }} // Usa la cámara trasera
+              containerStyle={{ width: "100%", height: "100%" }}
+            />
+          )}
+
+          {/* Pantalla de Cargando */}
+          {loadingQR && (
+            <div className="loading-screen">
+              <i className="pi pi-spin pi-spinner" style={{ fontSize: "3rem", color: "white" }}></i>
+              <p className="qr-message">Validando ticket...</p>
+            </div>
+          )}
+
+          {/* Mostrar información del Ticket después de escanear */}
+          {ticketInfo && (
+            <div className="ticket-info">
+              <h2>🎟️ Ticket Escaneado</h2>
+              <p><strong>Nombre:</strong> {ticketInfo.name}</p>
+              <p><strong>Producto:</strong> {ticketInfo.producto}</p>
+              <p><strong>Order ID:</strong> {ticketInfo.order_id}</p>
+              <p><strong>Estado:</strong> ✅ Usado</p>
+            </div>
+          )}
+
           <p className="qr-message">{qrMessage}</p>
-          {/* Botón de cierre */}
-          <Button
-            label="Cerrar"
-            icon="pi pi-times"
-            className="p-button-secondary close-btn"
-            onClick={() => setShowQRModal(false)}
+
+          <Button label="Cerrar" icon="pi pi-times" className="p-button-secondary close-btn"
+            onClick={() => {
+              setShowQRModal(false);
+              setTicketInfo(null);
+              setIsProcessing(false);
+              setDisableScanner(false);
+            }}
           />
         </div>
       </Dialog>

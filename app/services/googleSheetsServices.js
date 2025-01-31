@@ -28,28 +28,51 @@ const getGoogleSheets = async () => {
 export const getSheetData = async (sheetName) => {
   const sheets = await getGoogleSheets();
   const spreadsheetId = process.env.SPREEDSHEETID;
-  const range = `${sheetName}!A:Z`;
+
+  // Rango corregido: incluye un número de filas para evitar error de rango vacío
+  const range = `${sheetName}!A1:Z1000`;
 
   const response = await sheets.spreadsheets.values.get({ spreadsheetId, range });
+
   const [headers, ...rows] = response.data.values;
 
   return rows.map((row) =>
     headers.reduce((acc, header, i) => {
-      acc[header.toLowerCase()] = row[i];
+      acc[header.toLowerCase()] = row[i] || ""; // Evita errores si una celda está vacía
       return acc;
     }, {})
   );
 };
 
 export const updateAttendedStatus = async (row, status) => {
-    const sheets = await getGoogleSheets();
-    const spreadsheetId = process.env.SPREEDSHEETID;
-    const range = `undermotion!E${row}`;
-  
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range,
-      valueInputOption: "RAW",
-      requestBody: { values: [[status]] },
-    });
-  };
+  const sheets = await getGoogleSheets();
+  const spreadsheetId = process.env.SPREEDSHEETID;
+  const range = `undermotion!E${row}`;
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range,
+    valueInputOption: "RAW",
+    requestBody: { values: [[status]] },
+  });
+};
+
+export const updateTicketStatus = async (row, status) => {
+  if (!row || isNaN(row)) {
+    console.error("❌ Error: Número de fila inválido en updateTicketStatus:", row);
+    return;
+  }
+
+  const sheets = await getGoogleSheets();
+  const spreadsheetId = process.env.SPREEDSHEETID;
+  const range = `Tickets!G${row}`; // La columna D contiene "usado"
+
+  console.log(`🔹 Actualizando fila ${row} en ${range}`);
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range,
+    valueInputOption: "RAW",
+    requestBody: { values: [[status]] },
+  });
+};
