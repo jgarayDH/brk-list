@@ -7,12 +7,17 @@ import { InputText } from "primereact/inputtext";
 import { FilterMatchMode } from "primereact/api";
 import { Button } from "primereact/button";
 import { Dialog } from "primereact/dialog";
-import { QrReader } from "react-qr-reader";
+import dynamic from "next/dynamic"; // ✅ Evita errores SSR
 import "./styles/globals.css";
 
+// ✅ Cargar `Scanner` dinámicamente sin SSR
+const Scanner = dynamic(() => import("@yudiel/react-qr-scanner").then((mod) => mod.Scanner), { ssr: false });
+
 export default function Home() {
-  const [isProcessing, setIsProcessing] = useState(false); // 🔹 Bloquea escaneos repetidos
+  const [isProcessing, setIsProcessing] = useState(false);
   const [loadingQR, setLoadingQR] = useState(false);
+  const [scannerActive, setScannerActive] = useState(true);
+  const [qrData, setQrData] = useState(null);
   const [sheetData, setSheetData] = useState([]);
   const [ticketInfo, setTicketInfo] = useState(null);
   const [filters, setFilters] = useState({
@@ -23,85 +28,128 @@ export default function Home() {
   const [globalFilterValue, setGlobalFilterValue] = useState("");
   const [showQRModal, setShowQRModal] = useState(false);
   const [qrMessage, setQrMessage] = useState("");
-  const [disableScanner, setDisableScanner] = useState(false); // 🔹 Para desactivar la cámara después de un escaneo
 
   useEffect(() => {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    if (qrData && !isProcessing) {
+      validateTicket();
+    }
+  }, [qrData]);
+
   const fetchData = async () => {
     setLoading(true);
     try {
-      const response = await getSheetData("Tickets");
-      setSheetData(response);
+      // Obtener datos de la pestaña "undermotion"
+      const undermotionData = await getSheetData("undermotion");
+      
+      // Obtener datos de la pestaña "Tickets"
+      const ticketsData = await getSheetData("Tickets");
+  
+      // ✅ Separar la data correctamente
+      setSheetData(undermotionData);  // Para la tabla de invitados
+      setTicketsData(ticketsData);    // Para la validación de QR
+  
     } catch (error) {
-      console.error("Error fetching sheet data:", error);
+      console.error("❌ Error fetching sheet data:", error);
     }
     setLoading(false);
   };
 
-  const onGlobalFilterChange = (e) => {
-    const value = e.target.value;
-    let _filters = { ...filters };
-    _filters["nombre"].value = value;
-    setFilters(_filters);
-    setGlobalFilterValue(value);
+  const resetScanner = () => {
+    setIsProcessing(false);
+    setLoadingQR(false);
+    setTicketInfo(null);
+    setQrMessage("");
+    setScannerActive(true);
+    setQrData(null);
   };
 
-  const clearInput = () => {
-    setGlobalFilterValue("");
-    setFilters({ ...filters, nombre: { value: null } });
+  const closeModal = () => {
+    setShowQRModal(false);
+    resetScanner();
   };
 
-  const handleScan = async (result) => {
-    if (result?.text && !isProcessing) {
-      setIsProcessing(true); // 🔹 Evita múltiples peticiones
-      setDisableScanner(true); // 🔹 Apaga la cámara temporalmente
-      setLoadingQR(true); // 🔹 Activa el estado de carga
+  const validateTicket = async () => {
+    setIsProcessing(true);
+    setScannerActive(false);
+    setLoadingQR(true);
 
+    try {
+      console.log("📡 Escaneado:", qrData);
+
+      if (!qrData || !Array.isArray(qrData) || qrData.length === 0) {
+        console.error("❌ No se obtuvo código QR.");
+        setQrMessage("❌ No se pudo leer el código QR.");
+        setTimeout(() => resetScanner(), 3000);
+        return;
+      }
+
+      const scannedUrl = qrData[0]?.rawValue;
+      console.log("🔗 URL extraída:", scannedUrl);
+
+      if (!scannedUrl || typeof scannedUrl !== "string") {
+        console.error("❌ URL inválida.");
+        setQrMessage("❌ Código QR inválido.");
+        setTimeout(() => resetScanner(), 3000);
+        return;
+      }
+
+      let url;
       try {
-        const url = new URL(result.text);
-        const params = new URLSearchParams(url.search);
-        const securityCode = params.get("security_code");
+        url = new URL(scannedUrl);
+        console.log("✅ URL válida:", url.href);
+      } catch (error) {
+        console.error("❌ Error al convertir URL:", error);
+        setQrMessage("❌ Código QR inválido.");
+        setTimeout(() => resetScanner(), 3000);
+        return;
+      }
 
-        if (!securityCode) {
-          setQrMessage("❌ Código QR inválido.");
-          setTimeout(() => {
-            setIsProcessing(false);
-            setDisableScanner(false); // 🔹 Reactiva la cámara después de un tiempo
-          }, 3000);
-          return;
-        }
+      const params = new URLSearchParams(url.search);
+      const securityCode = params.get("security_code");
+      console.log("🔑 Security Code Extraído:", securityCode);
 
-        console.log("Security Code:", securityCode);
+      if (!securityCode) {
+        console.error("❌ Security Code no encontrado.");
+        setQrMessage("❌ Código QR inválido.");
+        setTimeout(() => resetScanner(), 3000);
+        return;
+      }
 
-        // 🔹 Solo una petición por escaneo
-        const response = await fetch("/api/verify-ticket", {
-          method: "POST",
-          body: JSON.stringify({ securityCode }),
-          headers: { "Content-Type": "application/json" },
-        });
+      console.log("📨 Enviando Security Code a la API:", securityCode);
 
-        const { success, message, ticket } = await response.json();
+      const response = await fetch("/api/verify-ticket", {
+        method: "POST",
+        body: JSON.stringify({ securityCode }),
+        headers: { "Content-Type": "application/json" },
+      });
 
-        if (success) {
-          setQrMessage("✅ Ticket registrado correctamente.");
-          setTicketInfo(ticket); // 🔹 Guardar datos del ticket
-          fetchData(); // 🔹 Recargar la tabla con los datos actualizados
+      const { success, message, ticket } = await response.json();
+
+      if (success) {
+        console.log("✅ Ticket válido:", ticket);
+        setQrMessage("");
+        setTicketInfo(ticket);
+        fetchData();
+      } else {
+        console.warn("⚠️ Ticket ya escaneado:", message);
+        if (ticket) {
+          setTicketInfo(ticket);
+          setQrMessage("⚠️ Este ticket ya ha sido utilizado.");
         } else {
           setQrMessage(`❌ ${message}`);
         }
-      } catch (error) {
-        setQrMessage("❌ Error procesando el código QR.");
-        console.error(error);
       }
-
-      setLoadingQR(false); // 🔹 Oculta la pantalla de carga
-      setTimeout(() => {
-        setIsProcessing(false);
-        setDisableScanner(false); // 🔹 Reactivar el escáner después de un tiempo
-      }, 3000);
+    } catch (error) {
+      console.error("❌ Error procesando QR:", error);
+      setQrMessage("❌ Error procesando el código QR.");
     }
+
+    setLoadingQR(false);
+    setIsProcessing(false);
   };
 
   return (
@@ -115,47 +163,33 @@ export default function Home() {
         <InputText
           className="w-12 sm:w-6 md:w-10 flex"
           value={globalFilterValue}
-          onChange={onGlobalFilterChange}
+          onChange={(e) => setGlobalFilterValue(e.target.value)}
           placeholder="Buscar por nombre"
         />
         <Button icon="pi pi-refresh" label="Recargar" onClick={fetchData} disabled={loading} />
-        <Button icon="pi pi-times" label="Limpiar" onClick={clearInput} />
+        <Button icon="pi pi-times" label="Limpiar" onClick={resetScanner} />
         <Button icon="pi pi-qrcode" label="Escanear QR" onClick={() => setShowQRModal(true)} />
       </div>
 
-      {/* TABLA DE INVITADOS */}
       <DataTable value={sheetData} paginator rows={50} filters={filters} loading={loading} dataKey="id" tableStyle={{ minWidth: "50rem" }}>
-        <Column field="nombre" header="Nombre"></Column>
-        <Column field="tier" header="Tier"></Column>
-        <Column field="tipo" header="Tipo"></Column>
-        <Column field="socio" header="Socio"></Column>
-        <Column field="attended" header="Asistencia" body={(rowData) => (rowData.attended === "true" ? "✅ Sí" : "❌ No")}></Column>
+        <Column field="nombre" header="Nombre" />
+        <Column field="tier" header="Tier" />
+        <Column field="tipo" header="Tipo" />
+        <Column field="socio" header="Socio" />
+        <Column field="attended" header="Asistencia" body={(rowData) => (rowData.attended === "true" ? "✅ Sí" : "❌ No")} />
       </DataTable>
 
-      {/* MODAL PARA ESCANEAR CÓDIGO QR */}
-      <Dialog
-        header="Escanear Código QR"
-        visible={showQRModal}
-        style={{ width: "100vw", height: "100vh", maxWidth: "100%", maxHeight: "100%" }}
-        onHide={() => {
-          setShowQRModal(false);
-          setTicketInfo(null);
-          setIsProcessing(false);
-          setDisableScanner(false);
-        }}
-        className="qr-dialog"
-      >
+      <Dialog header="Escanear Código QR" visible={showQRModal} onHide={closeModal} className="qr-dialog">
         <div className="qr-scanner-container">
-          {/* Mostrar QR Scanner solo si no está procesando */}
-          {!loadingQR && !ticketInfo && !disableScanner && (
-            <QrReader
-              onResult={handleScan}
-              constraints={{ facingMode: "environment" }} // Usa la cámara trasera
-              containerStyle={{ width: "100%", height: "100%" }}
+          {scannerActive && !loadingQR && !ticketInfo && (
+            <Scanner
+              onScan={(result) => setQrData(result)}
+              onError={(error) => console.error("Error escaneando:", error)}
+              constraints={{ facingMode: "environment" }}
+              style={{ width: "100%", height: "100vh" }}
             />
           )}
 
-          {/* Pantalla de Cargando */}
           {loadingQR && (
             <div className="loading-screen">
               <i className="pi pi-spin pi-spinner" style={{ fontSize: "3rem", color: "white" }}></i>
@@ -163,27 +197,19 @@ export default function Home() {
             </div>
           )}
 
-          {/* Mostrar información del Ticket después de escanear */}
           {ticketInfo && (
             <div className="ticket-info">
-              <h2>🎟️ Ticket Escaneado</h2>
+              <h2>🎟️ Ticket Escaneado correctamente :)</h2>
               <p><strong>Nombre:</strong> {ticketInfo.name}</p>
               <p><strong>Producto:</strong> {ticketInfo.producto}</p>
               <p><strong>Order ID:</strong> {ticketInfo.order_id}</p>
-              <p><strong>Estado:</strong> ✅ Usado</p>
+              <p><strong>Estado:</strong> {ticketInfo.attended === "TRUE" ? "⚠️ Usado" : "✅ Válido"}</p>
+
+              <Button label="Escanear otro código" icon="pi pi-qrcode" className="p-button-success mt-3" onClick={resetScanner} />
             </div>
           )}
 
           <p className="qr-message">{qrMessage}</p>
-
-          <Button label="Cerrar" icon="pi pi-times" className="p-button-secondary close-btn"
-            onClick={() => {
-              setShowQRModal(false);
-              setTicketInfo(null);
-              setIsProcessing(false);
-              setDisableScanner(false);
-            }}
-          />
         </div>
       </Dialog>
     </div>
