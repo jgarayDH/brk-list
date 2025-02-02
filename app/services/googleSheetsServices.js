@@ -29,7 +29,6 @@ export const getSheetData = async (sheetName) => {
   const sheets = await getGoogleSheets();
   const spreadsheetId = process.env.SPREEDSHEETID;
 
-  // Rango corregido: incluye un número de filas para evitar error de rango vacío
   const range = `${sheetName}!A1:Z1000`;
 
   const response = await sheets.spreadsheets.values.get({ spreadsheetId, range });
@@ -38,16 +37,17 @@ export const getSheetData = async (sheetName) => {
 
   return rows.map((row) =>
     headers.reduce((acc, header, i) => {
-      acc[header.toLowerCase()] = row[i] || ""; // Evita errores si una celda está vacía
+      acc[header.toLowerCase()] = row[i] || "";
       return acc;
     }, {})
   );
 };
 
+// ✅ Actualiza la columna "E" en `undermotion` (Asistencia de invitados)
 export const updateAttendedStatus = async (row, status) => {
   const sheets = await getGoogleSheets();
   const spreadsheetId = process.env.SPREEDSHEETID;
-  const range = `undermotion!E${row}`;
+  const range = `undermotion!G${row}`;
 
   await sheets.spreadsheets.values.update({
     spreadsheetId,
@@ -57,6 +57,7 @@ export const updateAttendedStatus = async (row, status) => {
   });
 };
 
+// ✅ Actualiza la columna "G" en `Tickets` (Estado del Ticket)
 export const updateTicketStatus = async (row, status) => {
   if (!row || isNaN(row)) {
     console.error("❌ Error: Número de fila inválido en updateTicketStatus:", row);
@@ -65,7 +66,7 @@ export const updateTicketStatus = async (row, status) => {
 
   const sheets = await getGoogleSheets();
   const spreadsheetId = process.env.SPREEDSHEETID;
-  const range = `Tickets!G${row}`; // La columna D contiene "usado"
+  const range = `Tickets!G${row}`;
 
   console.log(`🔹 Actualizando fila ${row} en ${range}`);
 
@@ -74,5 +75,26 @@ export const updateTicketStatus = async (row, status) => {
     range,
     valueInputOption: "RAW",
     requestBody: { values: [[status]] },
+  });
+};
+
+// ✅ Nueva función para actualizar la columna "G" en `undermotion` (Boletos utilizados)
+export const updateUtilizadosStatus = async (row, utilizados) => {
+  if (!row || isNaN(row)) {
+    console.error("❌ Error: Número de fila inválido en updateUtilizadosStatus:", row);
+    return;
+  }
+
+  const sheets = await getGoogleSheets();
+  const spreadsheetId = process.env.SPREEDSHEETID;
+  const range = `undermotion!G${row}`;
+
+  console.log(`🔹 Actualizando fila ${row} en ${range} con valor: ${utilizados}`);
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range,
+    valueInputOption: "RAW",
+    requestBody: { values: [[utilizados]] },
   });
 };

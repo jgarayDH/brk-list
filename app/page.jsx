@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect } from "react";
-import { getSheetData } from "./services/googleSheetsServices";
+import { getSheetData, updateUtilizadosStatus } from "./services/googleSheetsServices";
 import { DataTable } from "primereact/datatable";
 import { Column } from "primereact/column";
 import { InputText } from "primereact/inputtext";
@@ -8,6 +8,7 @@ import { FilterMatchMode } from "primereact/api";
 import { Button } from "primereact/button";
 import { Dialog } from "primereact/dialog";
 import dynamic from "next/dynamic"; // ✅ Evita errores SSR
+import { InputNumber } from 'primereact/inputnumber';
 import "./styles/globals.css";
 
 // ✅ Cargar `Scanner` dinámicamente sin SSR
@@ -44,14 +45,14 @@ export default function Home() {
     try {
       // Obtener datos de la pestaña "undermotion"
       const undermotionData = await getSheetData("undermotion");
-      
+
       // Obtener datos de la pestaña "Tickets"
       const ticketsData = await getSheetData("Tickets");
-  
+
       // ✅ Separar la data correctamente
       setSheetData(undermotionData);  // Para la tabla de invitados
       setTicketsData(ticketsData);    // Para la validación de QR
-  
+
     } catch (error) {
       console.error("❌ Error fetching sheet data:", error);
     }
@@ -152,6 +153,54 @@ export default function Home() {
     setIsProcessing(false);
   };
 
+  // ✅ Nueva función para actualizar la columna "G" en `undermotion`
+  const handleTicketChange = async (rowData, newValue) => {
+    if (newValue >= 0 && newValue <= rowData.cantidad) {
+      const rowNumber = sheetData.findIndex(row => row.id === rowData.id) + 2; // Ajuste de fila
+
+      try {
+        await updateUtilizadosStatus(rowNumber, newValue);
+        fetchData(); // Recargar los datos después de actualizar
+      } catch (error) {
+        console.error("❌ Error al actualizar boletos:", error);
+      }
+    }
+  };
+
+  const ticketCountTemplate = (rowData) => {
+    const boletosDisponibles = rowData.cantidad - rowData.utilizados;
+    return (
+      <div className="flex justify-content-between align-items-center">
+        <span className="mr-5">Disponibles: <span className="font-bold">{boletosDisponibles}</span></span>
+        <InputNumber
+          value={rowData.utilizados}
+          onValueChange={(e) => handleTicketChange(rowData, e.value)}
+          showButtons
+          step={1}
+          min={0}
+          max={rowData.cantidad}
+          incrementButtonIcon="pi pi-plus"
+          decrementButtonIcon="pi pi-minus"
+          inputClassName="w-3rem text-center"
+        />
+      </div>
+    );
+  };
+  const totalTicketsUsed = sheetData.reduce((total, rowData) => total + rowData.utilizados, 0);
+
+  const onGlobalFilterChange = (e) => {
+    const value = e.target.value;
+    let _filters = { ...filters };
+    _filters['nombre'].value = value;
+    setFilters(_filters);
+    setGlobalFilterValue(value);
+  };
+
+  const clearInput = () => {
+    setGlobalFilterValue('');
+    setFilters({ ...filters, nombre: { value: null } });
+  };
+
   return (
     <div className="p-2">
       <h1 className="mb-3">Mixmag Latam - BRK | Eternals 18.01.25</h1>
@@ -176,7 +225,7 @@ export default function Home() {
         <Column field="tier" header="Tier" />
         <Column field="tipo" header="Tipo" />
         <Column field="socio" header="Socio" />
-        <Column field="attended" header="Asistencia" body={(rowData) => (rowData.attended === "true" ? "✅ Sí" : "❌ No")} />
+        <Column field="utilizados" header="Boletos" body={ticketCountTemplate}></Column>
       </DataTable>
 
       <Dialog header="Escanear Código QR" visible={showQRModal} onHide={closeModal} className="qr-dialog">
@@ -209,7 +258,10 @@ export default function Home() {
             </div>
           )}
 
-          <p className="qr-message">{qrMessage}</p>
+          <div className="qr-message">
+            {qrMessage}
+            <Button label="Escanear otro código" icon="pi pi-qrcode" className="p-button-success mt-3" onClick={resetScanner} />
+          </div>
         </div>
       </Dialog>
     </div>
