@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect } from "react";
-import { getSheetData, updateUtilizadosStatus } from "./services/googleSheetsServices";
+// Se ha removido la importación directa del servicio de Google Sheets
 import { DataTable } from "primereact/datatable";
 import { Column } from "primereact/column";
 import { InputText } from "primereact/inputtext";
@@ -35,6 +35,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    console.log("📦 Cambió qrData:", qrData);
     if (qrData && !isProcessing) {
       validateTicket();
     }
@@ -43,16 +44,12 @@ export default function Home() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Obtener datos de la pestaña "undermotion"
-      const undermotionData = await getSheetData("undermotion");
+      const res = await fetch("/api/guests");
+      const data = await res.json();
 
-      // Obtener datos de la pestaña "Tickets"
-      const ticketsData = await getSheetData("Tickets");
+      console.log("📄 Data obtenida desde /api/guests:", data); // 👈 Aquí la puedes ver
 
-      // ✅ Separar la data correctamente
-      setSheetData(undermotionData);  // Para la tabla de invitados
-      setTicketsData(ticketsData);    // Para la validación de QR
-
+      setSheetData(data);
     } catch (error) {
       console.error("❌ Error fetching sheet data:", error);
     }
@@ -73,80 +70,78 @@ export default function Home() {
     resetScanner();
   };
 
+  const isUrlQrCode = (data) => {
+    try {
+      const url = new URL(data);
+      return url.searchParams.has("security_code");
+    } catch {
+      return false;
+    }
+  };
+
   const validateTicket = async () => {
     setIsProcessing(true);
     setScannerActive(false);
     setLoadingQR(true);
 
     try {
-      console.log("📡 Escaneado:", qrData);
-
       if (!qrData || !Array.isArray(qrData) || qrData.length === 0) {
-        console.error("❌ No se obtuvo código QR.");
+        console.log("🧪 Ejecutando validateTicket con qrData:", qrData);
         setQrMessage("❌ No se pudo leer el código QR.");
-        setTimeout(() => resetScanner(), 3000);
+        setTimeout(resetScanner, 3000);
         return;
       }
 
-      const scannedUrl = qrData[0]?.rawValue;
-      console.log("🔗 URL extraída:", scannedUrl);
+      const scannedValue = qrData[0]?.rawValue;
+      console.log("🔍 Valor escaneado (rawValue):", scannedValue);
 
-      if (!scannedUrl || typeof scannedUrl !== "string") {
-        console.error("❌ URL inválida.");
-        setQrMessage("❌ Código QR inválido.");
-        setTimeout(() => resetScanner(), 3000);
-        return;
-      }
+      if (isUrlQrCode(scannedValue)) {
+        // ✅ TICKET CON URL
+        const url = new URL(scannedValue);
+        const securityCode = url.searchParams.get("security_code");
+        console.log("🔒 Código de seguridad extraído:", securityCode);
+        console.log("📡 Enviando a /api/verify-ticket:", { securityCode });
+        const response = await fetch("/api/verify-ticket", {
+          method: "POST",
+          body: JSON.stringify({ securityCode }),
+          headers: { "Content-Type": "application/json" },
+        });
 
-      let url;
-      try {
-        url = new URL(scannedUrl);
-        console.log("✅ URL válida:", url.href);
-      } catch (error) {
-        console.error("❌ Error al convertir URL:", error);
-        setQrMessage("❌ Código QR inválido.");
-        setTimeout(() => resetScanner(), 3000);
-        return;
-      }
+        const { success, message, ticket } = await response.json();
 
-      const params = new URLSearchParams(url.search);
-      const securityCode = params.get("security_code");
-      console.log("🔑 Security Code Extraído:", securityCode);
-
-      if (!securityCode) {
-        console.error("❌ Security Code no encontrado.");
-        setQrMessage("❌ Código QR inválido.");
-        setTimeout(() => resetScanner(), 3000);
-        return;
-      }
-
-      console.log("📨 Enviando Security Code a la API:", securityCode);
-
-      const response = await fetch("/api/verify-ticket", {
-        method: "POST",
-        body: JSON.stringify({ securityCode }),
-        headers: { "Content-Type": "application/json" },
-      });
-
-      const { success, message, ticket } = await response.json();
-
-      if (success) {
-        console.log("✅ Ticket válido:", ticket);
-        setQrMessage("");
-        setTicketInfo(ticket);
-        fetchData();
-      } else {
-        console.warn("⚠️ Ticket ya escaneado:", message);
-        if (ticket) {
+        if (success) {
           setTicketInfo(ticket);
-          setQrMessage("⚠️ Este ticket ya ha sido utilizado.");
+          setQrMessage("✅ Ticket válido.");
+          fetchData();
         } else {
+          setTicketInfo(ticket || null);
+          setQrMessage(`❌ ${message}`);
+        }
+      } else {
+        // ✅ TICKET DE INVITADO (GUEST)
+        const codigo = scannedValue;
+        console.log("📨 Enviando a /api/verify-guest:", { codigo });
+
+        const response = await fetch("/api/verify-guest", {
+          method: "POST",
+          body: JSON.stringify({ codigo }),
+          headers: { "Content-Type": "application/json" },
+        });
+
+        const { success, message, guest } = await response.json();
+
+        if (success) {
+          setTicketInfo(guest);
+          setQrMessage("✅ Invitado válido.");
+          fetchData();
+        } else {
+          setTicketInfo(guest || null);
           setQrMessage(`❌ ${message}`);
         }
       }
-    } catch (error) {
-      console.error("❌ Error procesando QR:", error);
-      setQrMessage("❌ Error procesando el código QR.");
+    } catch (err) {
+      console.error("❌ Error general:", err);
+      setQrMessage("❌ Error procesando el QR.");
     }
 
     setLoadingQR(false);
@@ -156,11 +151,20 @@ export default function Home() {
   // ✅ Nueva función para actualizar la columna "G" en `undermotion`
   const handleTicketChange = async (rowData, newValue) => {
     if (newValue >= 0 && newValue <= rowData.cantidad) {
-      const rowNumber = sheetData.findIndex(row => row.id === rowData.id) + 2; // Ajuste de fila
+      const rowNumber = sheetData.findIndex(row => row.id === rowData.id) + 2;
 
       try {
-        await updateUtilizadosStatus(rowNumber, newValue);
-        fetchData(); // Recargar los datos después de actualizar
+        await fetch("/api/update-utilizados", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sheetName: "Guests",
+            column: "F",
+            rowNumber,
+            newValue,
+          }),
+        });
+        fetchData();
       } catch (error) {
         console.error("❌ Error al actualizar boletos:", error);
       }
@@ -179,6 +183,7 @@ export default function Home() {
           step={1}
           min={0}
           max={rowData.cantidad}
+          disabled={boletosDisponibles === 0}
           incrementButtonIcon="pi pi-plus"
           decrementButtonIcon="pi pi-minus"
           inputClassName="w-3rem text-center"
@@ -186,12 +191,21 @@ export default function Home() {
       </div>
     );
   };
-  const totalTicketsUsed = sheetData.reduce((total, rowData) => total + rowData.utilizados, 0);
+
+  const totalTicketsUsed = sheetData.reduce(
+    (total, row) => total + (parseInt(row.utilizados) || 0),
+    0
+  );
+
+  const totalTicketsAvailable = sheetData.reduce(
+    (total, row) => total + ((parseInt(row.cantidad) || 0) - (parseInt(row.utilizados) || 0)),
+    0
+  );
 
   const onGlobalFilterChange = (e) => {
     const value = e.target.value;
     let _filters = { ...filters };
-    _filters['nombre'].value = value;
+    _filters["global"].value = value;
     setFilters(_filters);
     setGlobalFilterValue(value);
   };
@@ -201,39 +215,56 @@ export default function Home() {
     setFilters({ ...filters, nombre: { value: null } });
   };
 
+  const isTicketUsed = (ticket) => {
+    if ("attended" in ticket) {
+      return ticket.attended === "TRUE";
+    } else {
+      return parseInt(ticket.utilizados || 0) >= parseInt(ticket.cantidad || 0);
+    }
+  };
+
   return (
     <div className="p-2">
-      <h1 className="mb-3">Mixmag Latam - BRK | Eternals 18.01.25</h1>
-      <p className="mt-1 text-right">
-        Boletos utilizados: <span className="font-bold">{sheetData.filter((row) => row.attended === "true").length}</span>
+      <h1 className="mb-3">UNDR | Tunnel 21.06.25</h1>
+      <p className="mt-1 text-right flex gap-4 justify-content-end">
+        <p>
+          🎟️ <strong>Total boletos utilizados:</strong> {totalTicketsUsed}
+        </p>
+        <p>
+          🎫 <strong>Total boletos disponibles:</strong> {totalTicketsAvailable}
+        </p>
       </p>
 
       <div className="flex flex-column sm:flex-row pb-3 gap-3">
         <InputText
-          className="w-12 sm:w-6 md:w-10 flex"
+          className="flex-auto flex"
           value={globalFilterValue}
-          onChange={(e) => setGlobalFilterValue(e.target.value)}
+          onChange={onGlobalFilterChange}
           placeholder="Buscar por nombre"
         />
+
         <Button icon="pi pi-refresh" label="Recargar" onClick={fetchData} disabled={loading} />
-        <Button icon="pi pi-times" label="Limpiar" onClick={resetScanner} />
+        <Button icon="pi pi-times" label="Limpiar" onClick={clearInput} />
         <Button icon="pi pi-qrcode" label="Escanear QR" onClick={() => setShowQRModal(true)} />
       </div>
 
-      <DataTable value={sheetData} paginator rows={50} filters={filters} loading={loading} dataKey="id" tableStyle={{ minWidth: "50rem" }}>
-        <Column field="nombre" header="Nombre" />
-        <Column field="tier" header="Tier" />
-        <Column field="tipo" header="Tipo" />
-        <Column field="socio" header="Socio" />
-        <Column field="utilizados" header="Boletos" body={ticketCountTemplate}></Column>
+      <DataTable value={sheetData} paginator rows={50} filters={filters} globalFilterFields={["name", "codigo", "tipo_entrada"]} loading={loading} dataKey="id" tableStyle={{ minWidth: "50rem" }}>
+        <Column field="name" header="Nombre" />
+        <Column field="codigo" header="Codigo" />
+        <Column field="tipo_entrada" header="Tipo de entrada" />
+        {/* <Column field="socio" header="Socio" /> */}
+        <Column field="utilizados" header="Tickets disponibles" body={ticketCountTemplate}></Column>
       </DataTable>
 
       <Dialog header="Escanear Código QR" visible={showQRModal} onHide={closeModal} className="qr-dialog">
         <div className="qr-scanner-container">
           {scannerActive && !loadingQR && !ticketInfo && (
             <Scanner
-              onScan={(result) => setQrData(result)}
-              onError={(error) => console.error("Error escaneando:", error)}
+              onScan={(result) => {
+                console.log("📸 Resultado escaneado:", result);
+                setQrData(result);
+              }}
+              onError={(error) => console.error("❌ Error escaneando:", error)}
               constraints={{ facingMode: "environment" }}
               style={{ width: "100%", height: "100vh" }}
             />
@@ -247,16 +278,26 @@ export default function Home() {
           )}
 
           {ticketInfo && (
-            <div className="ticket-info">
-              <h2>🎟️ Ticket Escaneado correctamente :)</h2>
-              <p><strong>Nombre:</strong> {ticketInfo.name}</p>
-              <p><strong>Producto:</strong> {ticketInfo.producto}</p>
-              <p><strong>Order ID:</strong> {ticketInfo.order_id}</p>
-              <p><strong>Estado:</strong> {ticketInfo.attended === "TRUE" ? "⚠️ Usado" : "✅ Válido"}</p>
+              <div className="ticket-info">
+                <h2>🎟️ Ticket Escaneado correctamente :)</h2>
+                <p><strong>Nombre:</strong> {ticketInfo.name}</p>
 
-              <Button label="Escanear otro código" icon="pi pi-qrcode" className="p-button-success mt-3" onClick={resetScanner} />
-            </div>
-          )}
+                {"producto" in ticketInfo ? (
+                  <>
+                    <p><strong>Producto:</strong> {ticketInfo.producto || "Cortesía"}</p>
+                    <p><strong>Order ID:</strong> {ticketInfo.order_id || "N/A"}</p>
+                    <p><strong>Estado:</strong> {ticketInfo.attended === "TRUE" ? "⚠️ Usado" : "✅ Válido"}</p>
+                  </>
+                ) : (
+                  <>
+                    <p><strong>Código:</strong> {ticketInfo.codigo}</p>
+                    <p><strong>Tipo de Entrada:</strong> {ticketInfo.tipo_entrada}</p>
+                    <p><strong>Tickets utilizados:</strong> {ticketInfo.utilizados} / {ticketInfo.cantidad}</p>
+                    <p><strong>Estado:</strong> {ticketInfo.utilizados >= ticketInfo.cantidad ? "⚠️ Ya no disponible" : "✅ Disponible"}</p>
+                  </>
+                )}
+              </div>
+            )}
 
           <div className="qr-message">
             {qrMessage}
