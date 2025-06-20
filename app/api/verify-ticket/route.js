@@ -3,7 +3,7 @@ import { updateTicketStatus } from "@/app/services/googleSheetsService";
 export async function POST(req) {
     try {
         const { securityCode } = await req.json();
-
+        console.log("🔍 Código recibido:", securityCode);
         if (!securityCode) {
             return new Response(JSON.stringify({ success: false, message: "Código no proporcionado." }), { status: 400 });
         }

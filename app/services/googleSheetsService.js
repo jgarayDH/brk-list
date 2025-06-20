@@ -54,31 +54,41 @@ export async function updateTicketStatus(securityCode, newValue = "TRUE") {
   const spreadsheetId = process.env.SPREEDSHEETID;
   const sheetName = "Tickets";
   const range = `${sheetName}!A2:H`;
-  
+
   const res = await sheets.spreadsheets.values.get({ spreadsheetId, range });
   const rows = res.data.values;
 
-  if (!rows || rows.length === 0) return { success: false, message: "No hay datos." };
+  if (!rows || rows.length === 0) {
+    return { success: false, message: "No hay datos." };
+  }
 
-  const rowIndex = rows.findIndex((row) => row[5] === securityCode); // columna G (índice 5)
-  if (rowIndex === -1) return { success: false, message: "Ticket no encontrado." };
+  // 🛠 Buscar por security_code que está en la columna E (índice 4)
+  const rowIndex = rows.findIndex((row) => row[4] === securityCode);
 
-  const attended = rows[rowIndex][6]; // columna H
+  if (rowIndex === -1) {
+    return { success: false, message: "Ticket no encontrado." };
+  }
+
+  const attended = rows[rowIndex][6]; // Columna G (índice 6)
 
   if (attended === "TRUE") {
     return {
       success: false,
       message: "El ticket ya fue utilizado.",
       ticket: {
-        name: rows[rowIndex][1],
+        name: rows[rowIndex][0],
+        email: rows[rowIndex][1],
         producto: rows[rowIndex][2],
-        order_id: rows[rowIndex][4],
+        order_id: rows[rowIndex][3],
+        security_code: rows[rowIndex][4],
         attended,
       },
     };
   }
 
-  const updateRange = `${sheetName}!H${rowIndex + 2}`; // fila real
+  // ✅ Actualizar celda en columna G (índice 6 → letra G) y fila real
+  const updateRange = `${sheetName}!G${rowIndex + 2}`;
+
   await sheets.spreadsheets.values.update({
     spreadsheetId,
     range: updateRange,
@@ -92,9 +102,11 @@ export async function updateTicketStatus(securityCode, newValue = "TRUE") {
     success: true,
     message: "Ticket actualizado correctamente.",
     ticket: {
-      name: rows[rowIndex][1],
+      name: rows[rowIndex][0],
+      email: rows[rowIndex][1],
       producto: rows[rowIndex][2],
-      order_id: rows[rowIndex][4],
+      order_id: rows[rowIndex][3],
+      security_code: rows[rowIndex][4],
       attended: newValue,
     },
   };
@@ -152,6 +164,27 @@ export async function updateGuestStatus(code) {
       attended: newUtilizados >= cantidad ? "TRUE" : "FALSE",
     }
   };
+}
+
+export async function addDoorSale({ cantidad, metodoPago }) {
+  const auth = await getAuth();
+  const sheets = google.sheets({ version: "v4", auth });
+  const spreadsheetId = process.env.SPREEDSHEETID;
+
+  const now = new Date();
+  const fecha = now.toLocaleString("es-SV", { timeZone: "America/El_Salvador" }); // puedes ajustar zona horaria si lo deseas
+  const total = parseInt(cantidad, 10) * 20;
+
+  const values = [[fecha, cantidad, metodoPago, total]];
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: "VentasPuerta!A:D", // asegúrate de tener esta hoja creada con columnas: Fecha, Cantidad, Método de Pago, Total
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values },
+  });
+
+  return { success: true };
 }
 
 async function getAuth() {

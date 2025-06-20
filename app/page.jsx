@@ -30,6 +30,10 @@ export default function Home() {
   const [showQRModal, setShowQRModal] = useState(false);
   const [qrMessage, setQrMessage] = useState("");
 
+  const [showVentaModal, setShowVentaModal] = useState(false);
+  const [cantidadVenta, setCantidadVenta] = useState(1);
+  const [metodoPago, setMetodoPago] = useState("cash");
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -114,7 +118,11 @@ export default function Home() {
           setQrMessage("✅ Ticket válido.");
           fetchData();
         } else {
-          setTicketInfo(ticket || null);
+          if (ticket) {
+            setTicketInfo(ticket);
+          } else {
+            setTicketInfo(null);
+          }
           setQrMessage(`❌ ${message}`);
         }
       } else {
@@ -223,6 +231,26 @@ export default function Home() {
     }
   };
 
+  const registrarVenta = async () => {
+    try {
+      const response = await fetch("/api/add-door-sale", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cantidad: cantidadVenta, metodoPago }) // ✅ corrección aquí
+      });
+      const data = await response.json();
+      if (data.success) {
+        setCantidadVenta(1);
+        setMetodoPago("cash");
+        setShowVentaModal(false);
+      } else {
+        alert("Error: " + data.message);
+      }
+    } catch (error) {
+      console.error("❌ Error al registrar venta:", error);
+    }
+  };
+
   return (
     <div className="p-2">
       <h1 className="mb-3">UNDR | Tunnel 21.06.25</h1>
@@ -246,6 +274,7 @@ export default function Home() {
         <Button icon="pi pi-refresh" label="Recargar" onClick={fetchData} disabled={loading} />
         <Button icon="pi pi-times" label="Limpiar" onClick={clearInput} />
         <Button icon="pi pi-qrcode" label="Escanear QR" onClick={() => setShowQRModal(true)} />
+        <Button icon="pi pi-plus" label="Registrar venta en puerta" onClick={() => setShowVentaModal(true)} />
       </div>
 
       <DataTable value={sheetData} paginator rows={50} filters={filters} globalFilterFields={["name", "codigo", "tipo_entrada"]} loading={loading} dataKey="id" tableStyle={{ minWidth: "50rem" }}>
@@ -277,27 +306,15 @@ export default function Home() {
             </div>
           )}
 
-          {ticketInfo && (
-              <div className="ticket-info">
-                <h2>🎟️ Ticket Escaneado correctamente :)</h2>
-                <p><strong>Nombre:</strong> {ticketInfo.name}</p>
-
-                {"producto" in ticketInfo ? (
-                  <>
-                    <p><strong>Producto:</strong> {ticketInfo.producto || "Cortesía"}</p>
-                    <p><strong>Order ID:</strong> {ticketInfo.order_id || "N/A"}</p>
-                    <p><strong>Estado:</strong> {ticketInfo.attended === "TRUE" ? "⚠️ Usado" : "✅ Válido"}</p>
-                  </>
-                ) : (
-                  <>
-                    <p><strong>Código:</strong> {ticketInfo.codigo}</p>
-                    <p><strong>Tipo de Entrada:</strong> {ticketInfo.tipo_entrada}</p>
-                    <p><strong>Tickets utilizados:</strong> {ticketInfo.utilizados} / {ticketInfo.cantidad}</p>
-                    <p><strong>Estado:</strong> {ticketInfo.utilizados >= ticketInfo.cantidad ? "⚠️ Ya no disponible" : "✅ Disponible"}</p>
-                  </>
-                )}
-              </div>
-            )}
+          {ticketInfo && qrMessage.startsWith("✅") && (
+            <div className="ticket-info bg-white">
+              <h2>🎟️ Ticket Escaneado correctamente</h2>
+              <p><strong>Nombre:</strong> {ticketInfo.name}</p>
+              <p><strong>Producto:</strong> {ticketInfo.producto || "Cortesía"}</p>
+              <p><strong>Order ID:</strong> {ticketInfo.order_id || "N/A"}</p>
+              <p><strong>Estado:</strong> {ticketInfo.attended === "TRUE" ? "⚠️ Usado" : "✅ Válido"}</p>
+            </div>
+          )}
 
           <div className="qr-message">
             {qrMessage}
@@ -305,6 +322,23 @@ export default function Home() {
           </div>
         </div>
       </Dialog>
+
+      <Dialog header="Registrar venta en puerta" visible={showVentaModal} onHide={() => setShowVentaModal(false)}>
+        <div className="flex flex-column gap-3">
+          <label>Cantidad de tickets</label>
+          <InputNumber value={cantidadVenta} onValueChange={(e) => setCantidadVenta(e.value)} min={1} showButtons />
+
+          <label>Método de pago</label>
+          <select value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} className="p-inputtext">
+            <option value="cash">Cash</option>
+            <option value="tarjeta">Tarjeta</option>
+            <option value="bitcoin">Bitcoin</option>
+          </select>
+
+          <Button label="Guardar venta" icon="pi pi-check" className="p-button-success" onClick={registrarVenta} />
+        </div>
+      </Dialog>
+
     </div>
   );
 }
