@@ -62,14 +62,13 @@ export async function updateTicketStatus(securityCode, newValue = "TRUE") {
     return { success: false, message: "No hay datos." };
   }
 
-  // 🛠 Buscar por security_code que está en la columna E (índice 4)
   const rowIndex = rows.findIndex((row) => row[4] === securityCode);
 
   if (rowIndex === -1) {
     return { success: false, message: "Ticket no encontrado." };
   }
 
-  const attended = rows[rowIndex][6]; // Columna G (índice 6)
+  const attended = rows[rowIndex][6];
 
   if (attended === "TRUE") {
     return {
@@ -86,7 +85,6 @@ export async function updateTicketStatus(securityCode, newValue = "TRUE") {
     };
   }
 
-  // ✅ Actualizar celda en columna G (índice 6 → letra G) y fila real
   const updateRange = `${sheetName}!G${rowIndex + 2}`;
 
   await sheets.spreadsheets.values.update({
@@ -125,45 +123,45 @@ export async function updateGuestStatus(code) {
     return { success: false, message: "No hay registros." };
   }
 
-  const index = rows.findIndex((row) => row[3] === code); // columna D = código
-  if (index === -1) {
-    return { success: false, message: "Código no encontrado." };
-  }
+  const matchingRows = rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => row[3] === code);
 
-  const row = rows[index];
-  const cantidad = parseInt(row[2]) || 0; // columna C = cantidad
-  const utilizados = parseInt(row[5]) || 0; // columna F = utilizados
+  for (const { row, index } of matchingRows) {
+    const cantidad = parseInt(row[2]) || 0;
+    const utilizados = parseInt(row[5]) || 0;
 
-  if (utilizados >= cantidad) {
-    return { success: false, message: "Todos los tickets ya fueron utilizados.", guest: { ...row, utilizados, attended: "TRUE" } };
-  }
+    if (utilizados < cantidad) {
+      const newUtilizados = utilizados + 1;
+      const rowNumber = index + 2;
+      const updateRange = `Guests!F${rowNumber}`;
 
-  const newUtilizados = utilizados + 1;
-  const rowNumber = index + 2;
-  const updateRange = `Guests!F${rowNumber}`;
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: updateRange,
+        valueInputOption: "RAW",
+        requestBody: {
+          values: [[String(newUtilizados)]],
+        },
+      });
 
-  await sheets.spreadsheets.values.update({
-    spreadsheetId,
-    range: updateRange,
-    valueInputOption: "RAW",
-    requestBody: {
-      values: [[String(newUtilizados)]],
-    },
-  });
-
-  return {
-    success: true,
-    message: "✅ Guest validado correctamente.",
-    guest: {
-      id: row[0],
-      name: row[1],
-      cantidad,
-      codigo: row[3],
-      tipo_entrada: row[4],
-      utilizados: newUtilizados,
-      attended: newUtilizados >= cantidad ? "TRUE" : "FALSE",
+      return {
+        success: true,
+        message: "✅ Guest validado correctamente.",
+        guest: {
+          id: row[0],
+          name: row[1],
+          cantidad,
+          codigo: row[3],
+          tipo_entrada: row[4],
+          utilizados: newUtilizados,
+          attended: newUtilizados >= cantidad ? "TRUE" : "FALSE",
+        }
+      };
     }
-  };
+  }
+
+  return { success: false, message: "Todos los tickets ya fueron utilizados." };
 }
 
 export async function addDoorSale({ cantidad, metodoPago }) {
@@ -172,14 +170,14 @@ export async function addDoorSale({ cantidad, metodoPago }) {
   const spreadsheetId = process.env.SPREEDSHEETID;
 
   const now = new Date();
-  const fecha = now.toLocaleString("es-SV", { timeZone: "America/El_Salvador" }); // puedes ajustar zona horaria si lo deseas
+  const fecha = now.toLocaleString("es-SV", { timeZone: "America/El_Salvador" });
   const total = parseInt(cantidad, 10) * 20;
 
   const values = [[fecha, cantidad, metodoPago, total]];
 
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: "VentasPuerta!A:D", // asegúrate de tener esta hoja creada con columnas: Fecha, Cantidad, Método de Pago, Total
+    range: "VentasPuerta!A:D",
     valueInputOption: "USER_ENTERED",
     requestBody: { values },
   });
