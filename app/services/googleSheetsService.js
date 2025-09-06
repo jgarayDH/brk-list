@@ -1,26 +1,34 @@
 import { google } from "googleapis";
 
+/** Hora local en SV, lista para guardar en Sheets */
+function nowSV() {
+  return new Date().toLocaleString("es-SV", { timeZone: "America/El_Salvador" });
+}
+
 export async function getSheetData(sheetName) {
-    const auth = await getAuth();
-    const sheets = google.sheets({ version: "v4", auth });
-    const spreadsheetId = process.env.SPREEDSHEETID;
-    const range = `${sheetName}!A2:H`;
+  const auth = await getAuth();
+  const sheets = google.sheets({ version: "v4", auth });
+  const spreadsheetId = process.env.SPREEDSHEETID;
 
-    const response = await sheets.spreadsheets.values.get({ spreadsheetId, range });
-    const rows = response.data.values;
+  // ⬇️ Ahora leemos hasta la columna J
+  const range = `${sheetName}!A2:J`;
 
-    if (!rows || rows.length === 0) return [];
+  const response = await sheets.spreadsheets.values.get({ spreadsheetId, range });
+  const rows = response.data.values;
 
-    return rows.map((row, index) => ({
-        rowNumber: index + 2, // Para referencia en actualizaciones
-        id: row[0],
-        name: row[1],
-        cantidad: parseInt(row[2], 10) || 0,
-        codigo: row[3],
-        tipo_entrada: row[4],
-        utilizados: parseInt(row[5], 10) || 0,
-        attended: row[6],
-    }));
+  if (!rows || rows.length === 0) return [];
+
+  return rows.map((row, index) => ({
+    rowNumber: index + 2,
+    id: row[0],
+    name: row[1],
+    cantidad: parseInt(row[2], 10) || 0,
+    codigo: row[3],
+    tipo_entrada: row[4],
+    utilizados: parseInt(row[5], 10) || 0,
+    attended: row[6],
+    fecha_ingreso: row[9] || "",
+  }));
 }
 
 export async function updateUtilizadosStatus(sheetName, columnLetter, row, newValue) {
@@ -39,6 +47,22 @@ export async function updateUtilizadosStatus(sheetName, columnLetter, row, newVa
   });
 }
 
+async function setFechaIngreso(sheetName, rowNumber) {
+  const auth = await getAuth();
+  const sheets = google.sheets({ version: "v4", auth });
+  const spreadsheetId = process.env.SPREEDSHEETID;
+  const range = `${sheetName}!J${rowNumber}`;
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range,
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [[nowSV()]],
+    },
+  });
+}
+
 export async function getGuestByCode(code) {
   const guests = await getSheetData("Guests");
   return guests.find((g) => g.codigo === code);
@@ -46,6 +70,7 @@ export async function getGuestByCode(code) {
 
 export async function markGuestAsUsed(rowNumber, newValue = 1) {
   await updateUtilizadosStatus("Guests", "F", rowNumber, newValue);
+  await setFechaIngreso("Guests", rowNumber);
 }
 
 export async function updateTicketStatus(securityCode, newValue = "TRUE") {
@@ -53,8 +78,8 @@ export async function updateTicketStatus(securityCode, newValue = "TRUE") {
   const sheets = google.sheets({ version: "v4", auth });
   const spreadsheetId = process.env.SPREEDSHEETID;
   const sheetName = "Tickets";
-  const range = `${sheetName}!A2:H`;
 
+  const range = `${sheetName}!A2:J`;
   const res = await sheets.spreadsheets.values.get({ spreadsheetId, range });
   const rows = res.data.values;
 
@@ -63,13 +88,11 @@ export async function updateTicketStatus(securityCode, newValue = "TRUE") {
   }
 
   const rowIndex = rows.findIndex((row) => row[4] === securityCode);
-
   if (rowIndex === -1) {
     return { success: false, message: "Ticket no encontrado." };
   }
 
   const attended = rows[rowIndex][6];
-
   if (attended === "TRUE") {
     return {
       success: false,
@@ -81,20 +104,24 @@ export async function updateTicketStatus(securityCode, newValue = "TRUE") {
         order_id: rows[rowIndex][3],
         security_code: rows[rowIndex][4],
         attended,
+        fecha_ingreso: rows[rowIndex][9] || "",
       },
     };
   }
 
-  const updateRange = `${sheetName}!G${rowIndex + 2}`;
+  const rowNumber = rowIndex + 2;
 
+  const updateRangeAttended = `${sheetName}!G${rowNumber}`;
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: updateRange,
+    range: updateRangeAttended,
     valueInputOption: "RAW",
     requestBody: {
       values: [[newValue]],
     },
   });
+
+  await setFechaIngreso(sheetName, rowNumber);
 
   return {
     success: true,
@@ -106,6 +133,7 @@ export async function updateTicketStatus(securityCode, newValue = "TRUE") {
       order_id: rows[rowIndex][3],
       security_code: rows[rowIndex][4],
       attended: newValue,
+      fecha_ingreso: nowSV(),
     },
   };
 }
@@ -115,7 +143,7 @@ export async function updateGuestStatus(code) {
   const sheets = google.sheets({ version: "v4", auth });
   const spreadsheetId = process.env.SPREEDSHEETID;
 
-  const range = `Guests!A2:H`;
+  const range = `Guests!A2:J`;
   const response = await sheets.spreadsheets.values.get({ spreadsheetId, range });
   const rows = response.data.values;
 
@@ -134,8 +162,8 @@ export async function updateGuestStatus(code) {
     if (utilizados < cantidad) {
       const newUtilizados = utilizados + 1;
       const rowNumber = index + 2;
-      const updateRange = `Guests!F${rowNumber}`;
 
+      const updateRange = `Guests!F${rowNumber}`;
       await sheets.spreadsheets.values.update({
         spreadsheetId,
         range: updateRange,
@@ -144,6 +172,8 @@ export async function updateGuestStatus(code) {
           values: [[String(newUtilizados)]],
         },
       });
+
+      await setFechaIngreso("Guests", rowNumber);
 
       return {
         success: true,
@@ -156,7 +186,8 @@ export async function updateGuestStatus(code) {
           tipo_entrada: row[4],
           utilizados: newUtilizados,
           attended: newUtilizados >= cantidad ? "TRUE" : "FALSE",
-        }
+          fecha_ingreso: nowSV(),
+        },
       };
     }
   }
@@ -169,9 +200,8 @@ export async function addDoorSale({ cantidad, metodoPago }) {
   const sheets = google.sheets({ version: "v4", auth });
   const spreadsheetId = process.env.SPREEDSHEETID;
 
-  const now = new Date();
-  const fecha = now.toLocaleString("es-SV", { timeZone: "America/El_Salvador" });
-  const total = parseInt(cantidad, 10) * 20;
+  const fecha = nowSV();
+  const total = (parseInt(String(cantidad), 10) || 0) * 20;
 
   const values = [[fecha, cantidad, metodoPago, total]];
 
