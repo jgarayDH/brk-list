@@ -254,14 +254,14 @@ export default function Home() {
   return (
     <div className="p-2">
       <h1 className="mb-3">UNDR | Cinema 06.09.25</h1>
-      <p className="mt-1 text-right flex gap-4 justify-content-end">
-        <p>
+      <div className="mt-1 text-right flex gap-4 justify-content-end mb-5">
+        <span>
           🎟️ <strong>Total boletos utilizados:</strong> {totalTicketsUsed}
-        </p>
-        <p>
+        </span>
+        <span>
           🎫 <strong>Total boletos disponibles:</strong> {totalTicketsAvailable}
-        </p>
-      </p>
+        </span>
+      </div>
 
       <div className="flex flex-column sm:flex-row pb-3 gap-3">
         <InputText
