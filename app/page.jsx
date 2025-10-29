@@ -55,17 +55,18 @@ export default function Home() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/guests?t=${Date.now()}`, {
-        method: "GET",
-        cache: "no-store",
-        headers: { "Cache-Control": "no-cache" },
+      const res = await fetch(`/api/guests?ts=${crypto.randomUUID()}`, {
+        method: 'GET',
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' },
       });
+      console.log('x-vercel-cache =', res.headers.get('x-vercel-cache')); // debe ser MISS o BYPASS
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setSheetData(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error("❌ Error fetching sheet data:", error);
-      setSheetData([]); // guard
+    } catch (e) {
+      console.error('❌ Error fetching sheet data:', e);
+      setSheetData([]);
     }
     setLoading(false);
   };
@@ -214,8 +215,8 @@ export default function Home() {
     setSheetData((prev) =>
       Array.isArray(prev)
         ? prev.map((r) =>
-            r.id === rowData.id ? { ...r, utilizados: utilizados + 1 } : r
-          )
+          r.id === rowData.id ? { ...r, utilizados: utilizados + 1 } : r
+        )
         : prev
     );
 
@@ -226,8 +227,8 @@ export default function Home() {
       setSheetData((prev) =>
         Array.isArray(prev)
           ? prev.map((r) =>
-              r.id === rowData.id ? { ...r, utilizados } : r
-            )
+            r.id === rowData.id ? { ...r, utilizados } : r
+          )
           : prev
       );
     } finally {
