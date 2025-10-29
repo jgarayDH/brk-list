@@ -28,7 +28,7 @@ export default function Home() {
 
   const [filters, setFilters] = useState({
     global: { value: null, matchMode: FilterMatchMode.CONTAINS },
-    name:   { value: null, matchMode: FilterMatchMode.CONTAINS }, // usa "name", no "nombre"
+    name: { value: null, matchMode: FilterMatchMode.CONTAINS }, // usa "name", no "nombre"
   });
   const [globalFilterValue, setGlobalFilterValue] = useState("");
 
@@ -182,51 +182,52 @@ export default function Home() {
   };
 
   // SOLO SUMAR: sin botón de restar, sin tipeo manual, min = valor actual
-// 🔁 Reemplaza tu ticketCountTemplate por este:
-const ticketCountTemplate = (rowData = {}) => {
-  const cantidad = Number(rowData.cantidad ?? 0);
-  const utilizados = Number(rowData.utilizados ?? 0);
-  const disponibles = Math.max(cantidad - utilizados, 0);
+  // 🔁 Reemplaza tu ticketCountTemplate por este:
+  const ticketCountTemplate = (rowData = {}) => {
+    const cantidad = Number(rowData.cantidad ?? 0);
+    const utilizados = Number(rowData.utilizados ?? 0);
+    const disponibles = Math.max(cantidad - utilizados, 0);
+    const [saving, setSaving] = useState(false);
 
-  const handleIncrement = async () => {
-    if (utilizados < cantidad) {
-      // Suma exactamente +1 usando tu API existente
-      await handleTicketChange(rowData, utilizados + 1);
-    }
-  };
+    const handleIncrement = async () => {
+      if (saving || utilizados >= cantidad) return;
+      setSaving(true);
 
-  return (
-    <div
-      className="flex justify-content-between align-items-center"
-      role="group"
-      aria-label={`Control de tickets para ${rowData.name || "invitado"}`}
-    >
-      <span className="mr-5">
-        Disponibles: <span className="font-bold">{disponibles}</span>
-      </span>
+      // Optimistic UI
+      setSheetData(prev =>
+        prev.map(r => r.id === rowData.id ? { ...r, utilizados: utilizados + 1 } : r)
+      );
 
-      <div className="flex align-items-center gap-2">
-        {/* Muestra el usado actual, solo lectura y accesible */}
-        <output
-          className="w-3rem text-center"
-          aria-live="polite"
-          aria-atomic="true"
-          aria-label="Tickets usados"
-        >
-          {utilizados}
-        </output>
+      try {
+        await handleTicketChange(rowData, utilizados + 1);
+      } catch (e) {
+        // rollback si falla
+        setSheetData(prev =>
+          prev.map(r => r.id === rowData.id ? { ...r, utilizados } : r)
+        );
+        console.error(e);
+      } finally {
+        setSaving(false);
+      }
+    };
 
-        {/* ÚNICO control: botón de sumar */}
-        <Button
-          icon="pi pi-plus"
-          aria-label="Agregar un ticket usado"
-          onClick={handleIncrement}
-          disabled={utilizados >= cantidad}  // desactiva al llegar al máximo
-        />
+    return (
+      <div className="flex justify-content-between align-items-center" role="group">
+        <span className="mr-5">
+          Disponibles: <span className="font-bold">{disponibles}</span>
+        </span>
+        <div className="flex align-items-center gap-2">
+          <output className="w-3rem text-center" aria-live="polite">{utilizados}</output>
+          <Button
+            icon="pi pi-plus"
+            aria-label="Marcar como usado (sumar 1)"
+            onClick={handleIncrement}
+            disabled={saving || utilizados >= cantidad}
+          />
+        </div>
       </div>
-    </div>
-  );
-};
+    );
+  };
 
   const totalTicketsUsed = (Array.isArray(sheetData) ? sheetData : [])
     .reduce((total, row = {}) => total + Number(row.utilizados ?? 0), 0);
@@ -283,7 +284,7 @@ const ticketCountTemplate = (rowData = {}) => {
 
   return (
     <div className="p-2">
-      <h1 className="mb-3">UNDR | Cinema 06.09.25</h1>
+      <h1 className="mb-3">UNDR | Dia de Muertos 01.11.25</h1>
 
       <div className="mt-1 text-right flex gap-4 justify-content-end">
         <span>🎟️ <strong>Total boletos utilizados:</strong> {totalTicketsUsed}</span>
@@ -316,7 +317,7 @@ const ticketCountTemplate = (rowData = {}) => {
         <Column field="name" header="Nombre" />
         <Column field="codigo" header="Codigo" />
         <Column field="tipo_entrada" header="Tipo de entrada" />
-        <Column field="utilizados" header="Tickets disponibles" body={ticketCountTemplate} />
+        <Column field="utilizados" header="Usados / Disponibles" body={ticketCountTemplate} />
       </DataTable>
 
       <Dialog header="Escanear Código QR" visible={showQRModal} onHide={closeModal} className="qr-dialog">
