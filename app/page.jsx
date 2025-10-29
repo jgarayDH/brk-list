@@ -13,7 +13,10 @@ import { InputNumber } from "primereact/inputnumber";
 import "./styles/globals.css";
 
 // Scanner solo cliente
-const Scanner = dynamic(() => import("@yudiel/react-qr-scanner").then(m => m.Scanner), { ssr: false });
+const Scanner = dynamic(
+  () => import("@yudiel/react-qr-scanner").then((m) => m.Scanner),
+  { ssr: false }
+);
 
 export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -35,6 +38,9 @@ export default function Home() {
   const [showVentaModal, setShowVentaModal] = useState(false);
   const [cantidadVenta, setCantidadVenta] = useState(1);
   const [metodoPago, setMetodoPago] = useState("cash");
+
+  // Estado para manejar "guardando" por fila (evita hooks dentro del template)
+  const [savingById, setSavingById] = useState({}); // { [rowId]: true }
 
   useEffect(() => {
     fetchData();
@@ -108,7 +114,10 @@ export default function Home() {
         const response = await fetch(`/api/verify-ticket?t=${Date.now()}`, {
           method: "POST",
           body: JSON.stringify({ securityCode }),
-          headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-cache",
+          },
           cache: "no-store",
         });
         const { success, message, ticket } = await response.json();
@@ -117,7 +126,7 @@ export default function Home() {
           setTicketInfo(ticket);
           setQrMessage("✅ Ticket válido.");
           // pequeño delay para que Sheets persista
-          await new Promise(r => setTimeout(r, 300));
+          await new Promise((r) => setTimeout(r, 300));
           await fetchData();
         } else {
           setTicketInfo(ticket || null);
@@ -129,7 +138,10 @@ export default function Home() {
         const response = await fetch(`/api/verify-guest?t=${Date.now()}`, {
           method: "POST",
           body: JSON.stringify({ codigo }),
-          headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-cache",
+          },
           cache: "no-store",
         });
         const { success, message, guest } = await response.json();
@@ -137,7 +149,7 @@ export default function Home() {
         if (success) {
           setTicketInfo(guest);
           setQrMessage("✅ Invitado válido.");
-          await new Promise(r => setTimeout(r, 300));
+          await new Promise((r) => setTimeout(r, 300));
           await fetchData();
         } else {
           setTicketInfo(guest || null);
@@ -158,70 +170,108 @@ export default function Home() {
     const cantidad = Number(rowData.cantidad ?? 0);
     const utilizados = Number(rowData.utilizados ?? 0);
 
-    // Solo permitir INCREMENTO
+    // Solo permitir INCREMENTO y no pasar el máximo
     if (Number(newValue) === utilizados + 1 && newValue <= cantidad) {
-      const rowNumber = (sheetData || []).findIndex(row => row.id === rowData.id) + 2;
+      const rowNumber =
+        (sheetData || []).findIndex((row) => row.id === rowData.id) + 2;
+
       try {
         await fetch(`/api/update-utilizados?t=${Date.now()}`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-cache",
+          },
           cache: "no-store",
           body: JSON.stringify({
             sheetName: "Guests",
-            column: "F",
+            column: "F", // F = utilizados
             rowNumber,
             newValue,
           }),
         });
-        await new Promise(r => setTimeout(r, 300));
+
+        // pequeño delay para que Sheets persista
+        await new Promise((r) => setTimeout(r, 300));
         await fetchData();
       } catch (error) {
         console.error("❌ Error al actualizar boletos:", error);
+        throw error; // para que el caller haga rollback
       }
     }
   };
 
+  // Incremento con UI optimista y bloqueo por fila (sin hooks dentro del template)
+  const incrementRowUsed = async (rowData) => {
+    const cantidad = Number(rowData.cantidad ?? 0);
+    const utilizados = Number(rowData.utilizados ?? 0);
+    if (utilizados >= cantidad) return;
+
+    // marcar "guardando" para esta fila
+    setSavingById((prev) => ({ ...prev, [rowData.id]: true }));
+
+    // UI optimista
+    setSheetData((prev) =>
+      Array.isArray(prev)
+        ? prev.map((r) =>
+            r.id === rowData.id ? { ...r, utilizados: utilizados + 1 } : r
+          )
+        : prev
+    );
+
+    try {
+      await handleTicketChange(rowData, utilizados + 1);
+    } catch (e) {
+      // rollback si falla
+      setSheetData((prev) =>
+        Array.isArray(prev)
+          ? prev.map((r) =>
+              r.id === rowData.id ? { ...r, utilizados } : r
+            )
+          : prev
+      );
+    } finally {
+      setSavingById((prev) => {
+        const copy = { ...prev };
+        delete copy[rowData.id];
+        return copy;
+      });
+    }
+  };
+
   // SOLO SUMAR: sin botón de restar, sin tipeo manual, min = valor actual
-  // 🔁 Reemplaza tu ticketCountTemplate por este:
   const ticketCountTemplate = (rowData = {}) => {
     const cantidad = Number(rowData.cantidad ?? 0);
     const utilizados = Number(rowData.utilizados ?? 0);
     const disponibles = Math.max(cantidad - utilizados, 0);
-    const [saving, setSaving] = useState(false);
-
-    const handleIncrement = async () => {
-      if (saving || utilizados >= cantidad) return;
-      setSaving(true);
-
-      // Optimistic UI
-      setSheetData(prev =>
-        prev.map(r => r.id === rowData.id ? { ...r, utilizados: utilizados + 1 } : r)
-      );
-
-      try {
-        await handleTicketChange(rowData, utilizados + 1);
-      } catch (e) {
-        // rollback si falla
-        setSheetData(prev =>
-          prev.map(r => r.id === rowData.id ? { ...r, utilizados } : r)
-        );
-        console.error(e);
-      } finally {
-        setSaving(false);
-      }
-    };
+    const saving = !!savingById[rowData.id];
 
     return (
-      <div className="flex justify-content-between align-items-center" role="group">
+      <div
+        className="flex justify-content-between align-items-center"
+        role="group"
+        aria-label={`Control de tickets para ${rowData.name || "invitado"}`}
+      >
         <span className="mr-5">
           Disponibles: <span className="font-bold">{disponibles}</span>
         </span>
+
         <div className="flex align-items-center gap-2">
-          <output className="w-3rem text-center" aria-live="polite">{utilizados}</output>
+          {/* Muestra el usado actual, solo lectura y accesible */}
+          <output
+            className="w-3rem text-center"
+            aria-live="polite"
+            aria-atomic="true"
+            aria-label="Tickets usados"
+          >
+            {utilizados}
+          </output>
+
+          {/* ÚNICO control: botón de sumar */}
           <Button
-            icon="pi pi-plus"
+            icon={saving ? "pi pi-spin pi-spinner" : "pi pi-plus"}
             aria-label="Marcar como usado (sumar 1)"
-            onClick={handleIncrement}
+            onClick={() => incrementRowUsed(rowData)}
             disabled={saving || utilizados >= cantidad}
           />
         </div>
@@ -229,25 +279,29 @@ export default function Home() {
     );
   };
 
-  const totalTicketsUsed = (Array.isArray(sheetData) ? sheetData : [])
-    .reduce((total, row = {}) => total + Number(row.utilizados ?? 0), 0);
+  const totalTicketsUsed = (Array.isArray(sheetData) ? sheetData : []).reduce(
+    (total, row = {}) => total + Number(row.utilizados ?? 0),
+    0
+  );
 
-  const totalTicketsAvailable = (Array.isArray(sheetData) ? sheetData : [])
-    .reduce((total, row = {}) => {
+  const totalTicketsAvailable = (Array.isArray(sheetData) ? sheetData : []).reduce(
+    (total, row = {}) => {
       const cant = Number(row.cantidad ?? 0);
       const used = Number(row.utilizados ?? 0);
       return total + Math.max(cant - used, 0);
-    }, 0);
+    },
+    0
+  );
 
   const onGlobalFilterChange = (e) => {
     const value = e?.target?.value ?? "";
-    setFilters(prev => ({ ...prev, global: { ...prev.global, value } }));
+    setFilters((prev) => ({ ...prev, global: { ...prev.global, value } }));
     setGlobalFilterValue(value);
   };
 
   const clearInput = () => {
     setGlobalFilterValue("");
-    setFilters(prev => ({
+    setFilters((prev) => ({
       ...prev,
       name: { ...prev.name, value: null },
       global: { ...prev.global, value: null },
@@ -265,7 +319,10 @@ export default function Home() {
     try {
       const response = await fetch(`/api/add-door-sale?t=${Date.now()}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-cache",
+        },
         cache: "no-store",
         body: JSON.stringify({ cantidad: cantidadVenta, metodoPago }),
       });
@@ -287,8 +344,12 @@ export default function Home() {
       <h1 className="mb-3">UNDR | Dia de Muertos 01.11.25</h1>
 
       <div className="mt-1 text-right flex gap-4 justify-content-end">
-        <span>🎟️ <strong>Total boletos utilizados:</strong> {totalTicketsUsed}</span>
-        <span>🎫 <strong>Total boletos disponibles:</strong> {totalTicketsAvailable}</span>
+        <span>
+          🎟️ <strong>Total boletos utilizados:</strong> {totalTicketsUsed}
+        </span>
+        <span>
+          🎫 <strong>Total boletos disponibles:</strong> {totalTicketsAvailable}
+        </span>
       </div>
 
       <div className="flex flex-column sm:flex-row pb-3 gap-3">
@@ -298,10 +359,23 @@ export default function Home() {
           onChange={onGlobalFilterChange}
           placeholder="Buscar por nombre"
         />
-        <Button icon="pi pi-refresh" label="Recargar" onClick={fetchData} disabled={loading} />
+        <Button
+          icon="pi pi-refresh"
+          label="Recargar"
+          onClick={fetchData}
+          disabled={loading}
+        />
         <Button icon="pi pi-times" label="Limpiar" onClick={clearInput} />
-        <Button icon="pi pi-qrcode" label="Escanear QR" onClick={() => setShowQRModal(true)} />
-        <Button icon="pi pi-plus" label="Registrar venta en puerta" onClick={() => setShowVentaModal(true)} />
+        <Button
+          icon="pi pi-qrcode"
+          label="Escanear QR"
+          onClick={() => setShowQRModal(true)}
+        />
+        <Button
+          icon="pi pi-plus"
+          label="Registrar venta en puerta"
+          onClick={() => setShowVentaModal(true)}
+        />
       </div>
 
       <DataTable
@@ -317,10 +391,19 @@ export default function Home() {
         <Column field="name" header="Nombre" />
         <Column field="codigo" header="Codigo" />
         <Column field="tipo_entrada" header="Tipo de entrada" />
-        <Column field="utilizados" header="Usados / Disponibles" body={ticketCountTemplate} />
+        <Column
+          field="utilizados"
+          header="Usados / Disponibles"
+          body={ticketCountTemplate}
+        />
       </DataTable>
 
-      <Dialog header="Escanear Código QR" visible={showQRModal} onHide={closeModal} className="qr-dialog">
+      <Dialog
+        header="Escanear Código QR"
+        visible={showQRModal}
+        onHide={closeModal}
+        className="qr-dialog"
+      >
         <div className="qr-scanner-container">
           {scannerActive && !loadingQR && !ticketInfo && (
             <Scanner
@@ -333,7 +416,10 @@ export default function Home() {
 
           {loadingQR && (
             <div className="loading-screen">
-              <i className="pi pi-spin pi-spinner" style={{ fontSize: "3rem", color: "white" }} />
+              <i
+                className="pi pi-spin pi-spinner"
+                style={{ fontSize: "3rem", color: "white" }}
+              />
               <p className="qr-message">Validando ticket...</p>
             </div>
           )}
@@ -341,33 +427,65 @@ export default function Home() {
           {ticketInfo && qrMessage.startsWith("✅") && (
             <div className="ticket-info bg-white">
               <h2>🎟️ Ticket Escaneado correctamente</h2>
-              <p><strong>Nombre:</strong> {ticketInfo.name}</p>
-              <p><strong>Producto:</strong> {ticketInfo.producto || "Cortesía"}</p>
-              <p><strong>Order ID:</strong> {ticketInfo.order_id || "N/A"}</p>
-              <p><strong>Estado:</strong> {isTicketUsed(ticketInfo) ? "⚠️ Usado" : "✅ Válido"}</p>
+              <p>
+                <strong>Nombre:</strong> {ticketInfo.name}
+              </p>
+              <p>
+                <strong>Producto:</strong> {ticketInfo.producto || "Cortesía"}
+              </p>
+              <p>
+                <strong>Order ID:</strong> {ticketInfo.order_id || "N/A"}
+              </p>
+              <p>
+                <strong>Estado:</strong>{" "}
+                {isTicketUsed(ticketInfo) ? "⚠️ Usado" : "✅ Válido"}
+              </p>
             </div>
           )}
 
           <div className="qr-message">
             {qrMessage}
-            <Button label="Escanear otro código" icon="pi pi-qrcode" className="p-button-success mt-3" onClick={resetScanner} />
+            <Button
+              label="Escanear otro código"
+              icon="pi pi-qrcode"
+              className="p-button-success mt-3"
+              onClick={resetScanner}
+            />
           </div>
         </div>
       </Dialog>
 
-      <Dialog header="Registrar venta en puerta" visible={showVentaModal} onHide={() => setShowVentaModal(false)}>
+      <Dialog
+        header="Registrar venta en puerta"
+        visible={showVentaModal}
+        onHide={() => setShowVentaModal(false)}
+      >
         <div className="flex flex-column gap-3">
           <label>Cantidad de tickets</label>
-          <InputNumber value={cantidadVenta} onValueChange={(e) => setCantidadVenta(e.value)} min={1} showButtons />
+          <InputNumber
+            value={cantidadVenta}
+            onValueChange={(e) => setCantidadVenta(e.value)}
+            min={1}
+            showButtons
+          />
 
           <label>Método de pago</label>
-          <select value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} className="p-inputtext">
+          <select
+            value={metodoPago}
+            onChange={(e) => setMetodoPago(e.target.value)}
+            className="p-inputtext"
+          >
             <option value="cash">Cash</option>
             <option value="tarjeta">Tarjeta</option>
             <option value="bitcoin">Bitcoin</option>
           </select>
 
-          <Button label="Guardar venta" icon="pi pi-check" className="p-button-success" onClick={registrarVenta} />
+          <Button
+            label="Guardar venta"
+            icon="pi pi-check"
+            className="p-button-success"
+            onClick={registrarVenta}
+          />
         </div>
       </Dialog>
     </div>
